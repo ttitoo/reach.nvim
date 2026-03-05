@@ -5,6 +5,8 @@ local fs_stat = vim.loop.fs_stat
 local module = {}
 
 local dir_to_root = {}
+local cwd_to_order = {}
+local next_order = 1
 
 local function normalize(path)
   if not path or #path == 0 then
@@ -92,10 +94,20 @@ local function make_grouped(entries)
         cwd = cwd,
         label = module.label(cwd),
       }
+
+      if not cwd_to_order[cwd] then
+        cwd_to_order[cwd] = next_order
+        next_order = next_order + 1
+      end
+
       grouped[cwd] = group
       table.insert(ordered, group)
     end
   end
+
+  table.sort(ordered, function(a, b)
+    return cwd_to_order[a.cwd] < cwd_to_order[b.cwd]
+  end)
 
   for _, group in pairs(ordered) do
     label_count[group.label] = (label_count[group.label] or 0) + 1
