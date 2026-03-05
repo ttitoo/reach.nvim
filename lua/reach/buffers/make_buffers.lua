@@ -1,4 +1,5 @@
 local Buffer = require('reach.buffers.buffer')
+local cwd = require('reach.buffers.cwd')
 local handles = require('reach.buffers.handles')
 local u = require('reach.buffers.util')
 local util = require('reach.util')
@@ -43,6 +44,8 @@ return function(options)
     end
 
     local buffer = Buffer:new(info)
+    buffer.cwd = cwd.resolve(buffer.name)
+    buffer.cwd_label = cwd.label(buffer.cwd)
 
     local force = util.any(function(v)
       return v == buffer.buftype or v == buffer.filetype

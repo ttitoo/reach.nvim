@@ -17,6 +17,8 @@ local group_to_fg_group = {
   ReachMatchExact = 'String',
   ReachPriority = 'Special',
   ReachCurrent = 'Title',
+  ReachCwdInactive = 'Comment',
+  ReachCwdActive = 'Title',
 }
 
 local highlights = {}

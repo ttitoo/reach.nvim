@@ -54,6 +54,7 @@ function module.buffers(options)
   end, bufs)
 
   local picker = Picker:new(entries)
+  local cwd_state = buffers.make_cwd_state(entries, options)
 
   local max_handle_length = 0
   local marker_present = false
@@ -70,13 +71,17 @@ function module.buffers(options)
 
   picker:set_ctx({
     options = options,
+    cwd = cwd_state,
     marker_present = marker_present,
     max_handle_length = max_handle_length,
   })
 
+  picker:after(buffers.footer)
+
   local machine = Machine:new(buffers.machine)
 
   machine.ctx = {
+    cwd = cwd_state,
     picker = picker,
     options = options,
   }
@@ -158,9 +163,14 @@ function module.colorschemes(options)
 end
 
 function module.switch_to_buffer(n, options)
-  local bufs = make_buffers(buffers.options.extend(options))
+  local cfg = buffers.options.extend(options)
+  local bufs = make_buffers(cfg)
+
   if bufs[n] then
-    buffer_util.switch_buf(bufs[n])
+    buffer_util.switch_buf(bufs[n], {
+      auto_chdir = cfg.cwd.auto_chdir,
+      scope = cfg.cwd.scope,
+    })
   end
 end
 

@@ -65,6 +65,12 @@ local options = {
       'Comment',
     },
   },
+  cwd = {
+    enable = true,              -- Group buffers by nearest cwd (directory containing .git)
+    layout = 'horizontal',      -- 'horizontal' or 'vertical' cwd selector
+    scope = 'tab',              -- 'tab' or 'window' or 'global' for directory switching
+    auto_chdir = true,          -- Change cwd when switching to a buffer
+  },
   -- A map of action to key that should be used to invoke it
   actions = {
     split = '-',
@@ -72,6 +78,12 @@ local options = {
     tabsplit = ']',
     delete = '<Space>',
     priority = '=',
+    cwd_next = '<Tab>',         -- Next cwd group
+    cwd_prev = '<S-Tab>',       -- Previous cwd group
+    cwd_fast = {                -- Quick jump to nth cwd group
+      '<F1>', '<F2>', '<F3>', '<F4>', '<F5>', '<F6>',
+      '<F7>', '<F8>', '<F9>', '<F10>', '<F11>', '<F12>',
+    },
   },
 }
 
@@ -94,6 +106,9 @@ When window is open:
 - press `|` to split buffer vertically
 - press `-` to split buffer horizontally
 - press `]` to open buffer in a new tab
+- press `<Tab>` to switch to next cwd group (selector is shown at the bottom)
+- press `<S-Tab>` to switch to previous cwd group
+- press `<F1>`..`<F12>` to jump directly to a cwd group
 
 If `options.handle` == 'auto':
 
@@ -213,4 +228,6 @@ ReachGrayOut            -> 'Comment'
 ReachMatchExact         -> 'String'
 ReachPriority           -> 'Special'
 ReachCurrent            -> 'Title'
+ReachCwdInactive        -> 'Comment'
+ReachCwdActive          -> 'Title'
 ```

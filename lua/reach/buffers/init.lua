@@ -1,4 +1,5 @@
 local cache = require('reach.cache')
+local cwd_util = require('reach.buffers.cwd')
 local handles = require('reach.buffers.handles')
 local helpers = require('reach.helpers')
 local read = require('reach.buffers.read')
@@ -84,8 +85,26 @@ function module.component(state)
   return parts
 end
 
-local function target_state(input, actions)
+local function target_state(input, options)
+  local actions = options.actions
   local r = util.replace_termcodes
+
+  if options.cwd.enable then
+    local next_key = actions.cwd_next or actions.cwd
+    local prev_key = actions.cwd_prev
+
+    if (next_key and input == r(next_key)) or (prev_key and input == r(prev_key)) then
+      return 'SWITCHING_CWD'
+    end
+
+    if type(actions.cwd_fast) == 'table' then
+      for _, key in ipairs(actions.cwd_fast) do
+        if key and input == r(key) then
+          return 'SWITCHING_CWD'
+        end
+      end
+    end
+  end
 
   if input == r(actions.delete) then
     return 'DELETING'
@@ -112,12 +131,67 @@ local function set_grayout(entries, matches)
   end, entries)
 end
 
-local function hide_current()
-  local current = vim.api.nvim_get_current_buf()
-
+local function entry_condition(self, include_current)
   return function(entry)
-    return entry.data.bufnr ~= current
+    return cwd_util.entry_visible(entry, self.ctx.cwd, {
+      show_current = self.ctx.options.show_current,
+      include_current = include_current,
+    })
   end
+end
+
+local function visible_entries(self, include_current)
+  return cwd_util.visible_entries(self.ctx.picker.entries, self.ctx.cwd, {
+    show_current = self.ctx.options.show_current,
+    include_current = include_current,
+  })
+end
+
+local function ensure_visible_group(self, include_current)
+  local entries = visible_entries(self, include_current)
+
+  if #entries > 0 or not self.ctx.cwd then
+    return entries
+  end
+
+  for _, group in ipairs(self.ctx.cwd.groups) do
+    self.ctx.cwd.active = group.cwd
+    entries = visible_entries(self, include_current)
+
+    if #entries > 0 then
+      return entries
+    end
+  end
+
+  return entries
+end
+
+local function sync_ctx(self)
+  self.ctx.picker:set_ctx({ state = self.current, cwd = self.ctx.cwd })
+end
+
+local function refresh_cwd(self)
+  if self.ctx.cwd then
+    cwd_util.refresh_state(self.ctx.cwd, self.ctx.picker.entries)
+  end
+end
+
+function module.make_cwd_state(entries, options)
+  if not options.cwd.enable then
+    return nil
+  end
+
+  return cwd_util.make_state(entries)
+end
+
+function module.footer(picker)
+  local ctx = picker.ctx
+
+  if not ctx.options.cwd.enable then
+    return nil
+  end
+
+  return cwd_util.footer(ctx.cwd, ctx.options.cwd, ctx.options.actions)
 end
 
 module.machine = {
@@ -135,8 +209,9 @@ module.machine = {
         on_enter = function(self)
           local picker = self.ctx.picker
 
-          picker:set_ctx({ state = self.current })
-          picker:render(not self.ctx.options.show_current and hide_current() or nil)
+          ensure_visible_group(self, false)
+          sync_ctx(self)
+          picker:render(entry_condition(self, false))
 
           local input = util.pgetcharstr()
 
@@ -148,17 +223,18 @@ module.machine = {
             input = input,
           }
 
-          self:transition(target_state(self.ctx.state.input, self.ctx.options.actions))
+          self:transition(target_state(self.ctx.state.input, self.ctx.options))
         end,
       },
-      targets = { 'SWITCHING', 'DELETING', 'SPLITTING', 'SETTING_PRIORITY', 'CLOSED' },
+      targets = { 'SWITCHING', 'SWITCHING_CWD', 'DELETING', 'SPLITTING', 'SETTING_PRIORITY', 'CLOSED' },
     },
     SWITCHING = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
+          local entries = ensure_visible_group(self, false)
 
-          local match = read_one(picker.entries, {
+          local match = read_one(entries, {
             input = self.ctx.state.input,
             on_input = function(matches, exact)
               if exact then
@@ -166,15 +242,18 @@ module.machine = {
               end
 
               if self.ctx.options.grayout then
-                set_grayout(picker.entries, matches)
+                set_grayout(entries, matches)
               end
 
-              picker:render(not self.ctx.options.show_current and hide_current() or nil)
+              picker:render(entry_condition(self, false))
             end,
           })
 
           if match then
-            buffer_util.switch_buf(match.data)
+            buffer_util.switch_buf(match.data, {
+              auto_chdir = self.ctx.options.cwd.auto_chdir,
+              scope = self.ctx.options.cwd.scope,
+            })
           end
 
           self:transition('CLOSED')
@@ -182,16 +261,43 @@ module.machine = {
       },
       targets = { 'CLOSED' },
     },
+    SWITCHING_CWD = {
+      hooks = {
+        on_enter = function(self)
+          local cwd = self.ctx.cwd
+          local actions = self.ctx.options.actions
+          local input = self.ctx.state.input
+
+          if not cwd or #cwd.groups < 2 then
+            return self:transition('OPEN')
+          end
+
+          if actions.cwd_prev and input == util.replace_termcodes(actions.cwd_prev) then
+            cwd_util.select_prev(cwd)
+          elseif (actions.cwd_next and input == util.replace_termcodes(actions.cwd_next))
+            or (actions.cwd and input == util.replace_termcodes(actions.cwd))
+          then
+            cwd_util.select_next(cwd)
+          else
+            cwd_util.select_by_shortcut(cwd, input, actions.cwd_fast)
+          end
+
+          self:transition('OPEN')
+        end,
+      },
+      targets = { 'OPEN' },
+    },
     DELETING = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
 
-          picker:set_ctx({ state = self.current })
-          picker:render()
+          sync_ctx(self)
+          picker:render(entry_condition(self, true))
 
           if self.ctx.options.handle == 'bufnr' then
-            local matches = read_many(picker.entries)
+            local entries = visible_entries(self, true)
+            local matches = read_many(entries)
 
             if not matches then
               return self:transition('OPEN')
@@ -208,6 +314,7 @@ module.machine = {
               if status then
                 count = count + 1
                 picker:remove('bufnr', match.data.bufnr)
+                refresh_cwd(self)
               elseif not unsaved then
                 unsaved = match.data
               end
@@ -219,7 +326,10 @@ module.machine = {
 
             if unsaved then
               notify('Save your changes first\n', vim.log.levels.ERROR, true)
-              buffer_util.switch_buf(unsaved)
+              buffer_util.switch_buf(unsaved, {
+                auto_chdir = self.ctx.options.cwd.auto_chdir,
+                scope = self.ctx.options.cwd.scope,
+              })
             else
               return self:transition('OPEN')
             end
@@ -227,17 +337,18 @@ module.machine = {
             local match
 
             repeat
+              local entries = visible_entries(self, true)
               local input = util.pgetcharstr()
 
               if not input then
                 return self:transition('CLOSED')
               end
 
-              if input == util.replace_termcodes(self.ctx.options.actions.delete) and #picker.entries > 1 then
+              if input == util.replace_termcodes(self.ctx.options.actions.delete) and #entries > 1 then
                 return self:transition('OPEN')
               end
 
-              match = read_one(picker.entries, { input = input })
+              match = read_one(entries, { input = input })
 
               if match then
                 if match.data.bufnr == vim.api.nvim_get_current_buf() then
@@ -248,16 +359,17 @@ module.machine = {
 
                 if status then
                   picker:remove('bufnr', match.data.bufnr)
+                  refresh_cwd(self)
                 else
                   notify('Save your changes first', vim.log.levels.ERROR, true)
                   break
                 end
 
-                if #picker.entries == 0 then
+                if #visible_entries(self, true) == 0 then
                   break
                 end
 
-                picker:render()
+                picker:render(entry_condition(self, true))
               end
 
             until not match
@@ -272,21 +384,22 @@ module.machine = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
+          local entries = ensure_visible_group(self, true)
 
-          picker:set_ctx({ state = self.current })
-          picker:render()
+          sync_ctx(self)
+          picker:render(entry_condition(self, true))
 
-          local match = read_one(picker.entries, {
+          local match = read_one(entries, {
             on_input = function(matches, exact)
               if exact then
                 exact:set_state({ exact = true })
               end
 
               if self.ctx.options.grayout then
-                set_grayout(picker.entries, matches)
+                set_grayout(entries, matches)
               end
 
-              picker:render()
+              picker:render(entry_condition(self, true))
             end,
           })
 
@@ -320,8 +433,8 @@ module.machine = {
             return self:transition('CLOSED')
           end
 
-          picker:set_ctx({ state = self.current })
-          picker:render()
+          sync_ctx(self)
+          picker:render(entry_condition(self, true))
 
           local priorities = cache.get('auto_priority')
 
@@ -330,7 +443,7 @@ module.machine = {
           end, picker.entries)
 
           while true do
-            local match = read_one(picker.entries)
+            local match = read_one(visible_entries(self, true))
 
             if not match then
               break
@@ -338,7 +451,7 @@ module.machine = {
 
             match:set_state({ exact = true })
             match.data.priority = nil
-            picker:render()
+            picker:render(entry_condition(self, true))
 
             local input = util.pgetcharstr()
 
@@ -370,7 +483,8 @@ module.machine = {
                 < util.index_of(b.data.handle, options.auto_handles)
             end)
 
-            picker:render()
+            refresh_cwd(self)
+            picker:render(entry_condition(self, true))
           end
 
           self:transition('CLOSED')

@@ -56,6 +56,10 @@ function Picker:before(fn)
   self._before = fn
 end
 
+function Picker:after(fn)
+  self._after = fn
+end
+
 function Picker:close()
   self._display:close()
 end
@@ -74,6 +78,17 @@ function Picker:render(condition)
   end
 
   local view, num_cols = make_view(visible)
+
+  if self._after then
+    local lines = self._after(self, visible)
+
+    if type(lines) == 'table' then
+      for _, line in ipairs(lines) do
+        table.insert(view, line)
+      end
+    end
+  end
+
   local options = { force_full_reconfig = num_cols ~= self._num_cols }
 
   self._num_cols = num_cols

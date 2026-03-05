@@ -4,6 +4,16 @@ local strdisplaywidth = vim.fn.strdisplaywidth
 
 local module = {}
 
+local function default_cwd_fast()
+  local keys = {}
+
+  for i = 1, 12 do
+    keys[i] = string.format('<F%s>', i)
+  end
+
+  return keys
+end
+
 local default = {
   show_icons = true,
   show_current = false,
@@ -24,12 +34,22 @@ local default = {
     chars = { '•' },
     groups = { 'String', 'Comment' },
   },
+  cwd = {
+    enable = true,
+    layout = 'horizontal',
+    scope = 'tab',
+    auto_chdir = true,
+  },
   actions = {
     split = '-',
     vertsplit = '|',
     tabsplit = ']',
     delete = '<Space>',
     priority = '=',
+    cwd_next = '<Tab>',
+    cwd_prev = '<S-Tab>',
+    cwd = '<Tab>',
+    cwd_fast = default_cwd_fast(),
   },
 }
 
@@ -66,6 +86,7 @@ local function validate(options)
   })
 
   if options then
+    local cwd = options.cwd
     local previous = options.previous
     local actions = options.actions
 
@@ -87,9 +108,19 @@ local function validate(options)
         optional(every(width(1))),
         'list of one column width characters',
       },
+      cwd = { cwd, 'table', true },
       previous = { previous, 'table', true },
       actions = { actions, 'table', true },
     })
+
+    if cwd then
+      vim.validate({
+        enable = { cwd.enable, 'boolean', true },
+        layout = { cwd.layout, optional(one_of({ 'horizontal', 'vertical' })), 'horizontal or vertical' },
+        scope = { cwd.scope, optional(one_of({ 'tab', 'window', 'global' })), 'tab, window or global' },
+        auto_chdir = { cwd.auto_chdir, 'boolean', true },
+      })
+    end
 
     if previous then
       vim.validate({
@@ -113,6 +144,16 @@ local function validate(options)
         tabsplit = { actions.tabsplit, 'string', true },
         delete = { actions.delete, 'string', true },
         priority = { actions.priority, 'string', true },
+        cwd_next = { actions.cwd_next, 'string', true },
+        cwd_prev = { actions.cwd_prev, 'string', true },
+        cwd = { actions.cwd, 'string', true },
+        cwd_fast = {
+          actions.cwd_fast,
+          optional(every(function(value)
+            return type(value) == 'string'
+          end)),
+          'list of key strings',
+        },
       })
     end
   end
