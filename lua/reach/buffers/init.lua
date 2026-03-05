@@ -10,6 +10,7 @@ local buffer_util = require('reach.buffers.util')
 local auto_handles = require('reach.buffers.constant').auto_handles
 
 local assign_auto_handles = handles.assign_auto_handles
+local assign_dynamic_handles = handles.assign_dynamic_handles
 local read_many = read.read_many
 local read_one = read.read_one
 local notify = helpers.notify
@@ -166,6 +167,47 @@ local function ensure_visible_group(self, include_current)
   return entries
 end
 
+local function assign_visible_handles(self, entries)
+  local options = self.ctx.options
+
+  if not self.ctx.cwd or options.handle == 'bufnr' then
+    return
+  end
+
+  local buffers = vim.tbl_map(function(entry)
+    return entry.data
+  end, entries)
+
+  if options.handle == 'auto' then
+    assign_auto_handles(
+      buffers,
+      { auto_handles = options.auto_handles, auto_exclude_handles = options.auto_exclude_handles }
+    )
+  elseif options.handle == 'dynamic' then
+    for _, buffer in ipairs(buffers) do
+      buffer.low_priority = nil
+    end
+
+    assign_dynamic_handles(buffers, options)
+  end
+
+  local max_handle_length = 0
+
+  for _, buffer in ipairs(buffers) do
+    if #buffer.handle > max_handle_length then
+      max_handle_length = #buffer.handle
+    end
+  end
+
+  self.ctx.picker:set_ctx({ max_handle_length = max_handle_length })
+end
+
+local function prepare_entries(self, include_current)
+  local entries = ensure_visible_group(self, include_current)
+  assign_visible_handles(self, entries)
+  return entries
+end
+
 local function sync_ctx(self)
   self.ctx.picker:set_ctx({ state = self.current, cwd = self.ctx.cwd })
 end
@@ -209,7 +251,7 @@ module.machine = {
         on_enter = function(self)
           local picker = self.ctx.picker
 
-          ensure_visible_group(self, false)
+          prepare_entries(self, false)
           sync_ctx(self)
           picker:render(entry_condition(self, false))
 
@@ -232,7 +274,7 @@ module.machine = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
-          local entries = ensure_visible_group(self, false)
+          local entries = prepare_entries(self, false)
 
           local match = read_one(entries, {
             input = self.ctx.state.input,
@@ -291,12 +333,12 @@ module.machine = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
+          local entries = prepare_entries(self, true)
 
           sync_ctx(self)
           picker:render(entry_condition(self, true))
 
           if self.ctx.options.handle == 'bufnr' then
-            local entries = visible_entries(self, true)
             local matches = read_many(entries)
 
             if not matches then
@@ -337,7 +379,7 @@ module.machine = {
             local match
 
             repeat
-              local entries = visible_entries(self, true)
+              entries = prepare_entries(self, true)
               local input = util.pgetcharstr()
 
               if not input then
@@ -384,7 +426,7 @@ module.machine = {
       hooks = {
         on_enter = function(self)
           local picker = self.ctx.picker
-          local entries = ensure_visible_group(self, true)
+          local entries = prepare_entries(self, true)
 
           sync_ctx(self)
           picker:render(entry_condition(self, true))
@@ -433,6 +475,7 @@ module.machine = {
             return self:transition('CLOSED')
           end
 
+          prepare_entries(self, true)
           sync_ctx(self)
           picker:render(entry_condition(self, true))
 
@@ -443,7 +486,7 @@ module.machine = {
           end, picker.entries)
 
           while true do
-            local match = read_one(visible_entries(self, true))
+            local match = read_one(prepare_entries(self, true))
 
             if not match then
               break
@@ -478,12 +521,18 @@ module.machine = {
               { auto_handles = options.auto_handles, auto_exclude_handles = options.auto_exclude_handles }
             )
 
+            local bufnr_to_index = {}
+
+            for i, buffer in ipairs(buffers) do
+              bufnr_to_index[buffer.bufnr] = i
+            end
+
             table.sort(picker.entries, function(a, b)
-              return util.index_of(a.data.handle, options.auto_handles)
-                < util.index_of(b.data.handle, options.auto_handles)
+              return (bufnr_to_index[a.data.bufnr] or math.huge) < (bufnr_to_index[b.data.bufnr] or math.huge)
             end)
 
             refresh_cwd(self)
+            prepare_entries(self, true)
             picker:render(entry_condition(self, true))
           end
 
