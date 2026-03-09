@@ -77,12 +77,13 @@ local options = {
     vertsplit = '|',
     tabsplit = ']',
     delete = '<Space>',
+    previous = '`',             -- Switch to previous buffer
     priority = '=',
     cwd_next = '<Tab>',         -- Next cwd group
     cwd_prev = '<S-Tab>',       -- Previous cwd group
+    cwd_apply = '<CR>',         -- Apply selected cwd without switching buffer
     cwd_fast = {                -- Quick jump to nth cwd group
-      '<F1>', '<F2>', '<F3>', '<F4>', '<F5>', '<F6>',
-      '<F7>', '<F8>', '<F9>', '<F10>', '<F11>', '<F12>',
+      '1', '2', '3', '4', '5', '6', '7', '8', '9',
     },
   },
 }
@@ -106,9 +107,11 @@ When window is open:
 - press `|` to split buffer vertically
 - press `-` to split buffer horizontally
 - press `]` to open buffer in a new tab
+- press `` ` `` to switch to previous buffer
 - press `<Tab>` to switch to next cwd group (selector is shown at the bottom)
 - press `<S-Tab>` to switch to previous cwd group
-- press `<F1>`..`<F12>` to jump directly to a cwd group
+- press `1`..`9` to jump directly to a cwd group
+- press `<CR>` to switch to the selected cwd only (keep current buffer)
 
 If `options.handle` == 'auto':
 

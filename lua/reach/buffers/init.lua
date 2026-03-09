@@ -93,12 +93,17 @@ local function target_state(input, options)
   if options.cwd.enable then
     local next_key = actions.cwd_next or actions.cwd
     local prev_key = actions.cwd_prev
+    local apply_key = actions.cwd_apply
 
     if (next_key and input == r(next_key)) or (prev_key and input == r(prev_key)) then
       return 'SWITCHING_CWD'
     end
 
-    if type(actions.cwd_fast) == 'table' then
+    if apply_key and input == r(apply_key) then
+      return 'APPLYING_CWD'
+    end
+
+    if options.handle ~= 'bufnr' and type(actions.cwd_fast) == 'table' then
       for _, key in ipairs(actions.cwd_fast) do
         if key and input == r(key) then
           return 'SWITCHING_CWD'
@@ -109,6 +114,10 @@ local function target_state(input, options)
 
   if input == r(actions.delete) then
     return 'DELETING'
+  end
+
+  if actions.previous and input == r(actions.previous) then
+    return 'SWITCHING_PREVIOUS'
   end
 
   if vim.tbl_contains({ r(actions.split), r(actions.vertsplit), r(actions.tabsplit) }, input) then
@@ -179,9 +188,16 @@ local function assign_visible_handles(self, entries)
   end, entries)
 
   if options.handle == 'auto' then
+    local excludes = vim.deepcopy(options.auto_exclude_handles)
+    local previous = options.actions and options.actions.previous
+
+    if previous and vim.fn.strdisplaywidth(previous) == 1 and not vim.tbl_contains(excludes, previous) then
+      table.insert(excludes, previous)
+    end
+
     assign_auto_handles(
       buffers,
-      { auto_handles = options.auto_handles, auto_exclude_handles = options.auto_exclude_handles }
+      { auto_handles = options.auto_handles, auto_exclude_handles = excludes }
     )
   elseif options.handle == 'dynamic' then
     for _, buffer in ipairs(buffers) do
@@ -268,7 +284,16 @@ module.machine = {
           self:transition(target_state(self.ctx.state.input, self.ctx.options))
         end,
       },
-      targets = { 'SWITCHING', 'SWITCHING_CWD', 'DELETING', 'SPLITTING', 'SETTING_PRIORITY', 'CLOSED' },
+      targets = {
+        'SWITCHING',
+        'SWITCHING_CWD',
+        'APPLYING_CWD',
+        'SWITCHING_PREVIOUS',
+        'DELETING',
+        'SPLITTING',
+        'SETTING_PRIORITY',
+        'CLOSED',
+      },
     },
     SWITCHING = {
       hooks = {
@@ -303,6 +328,41 @@ module.machine = {
       },
       targets = { 'CLOSED' },
     },
+    SWITCHING_PREVIOUS = {
+      hooks = {
+        on_enter = function(self)
+          local previous = vim.fn.bufnr('#')
+          local current = vim.api.nvim_get_current_buf()
+
+          if previous < 1 or previous == current then
+            notify('No previous buffer', vim.log.levels.INFO)
+            return self:transition('OPEN')
+          end
+
+          local previous_entry = util.find(function(entry)
+            return entry.data.bufnr == previous
+          end, self.ctx.picker.entries)
+
+          if previous_entry then
+            buffer_util.switch_buf(previous_entry.data, {
+              auto_chdir = self.ctx.options.cwd.auto_chdir,
+              scope = self.ctx.options.cwd.scope,
+            })
+            return self:transition('CLOSED')
+          end
+
+          local status = pcall(vim.api.nvim_command, 'buffer #')
+
+          if status then
+            return self:transition('CLOSED')
+          end
+
+          notify('No previous buffer', vim.log.levels.INFO)
+          self:transition('OPEN')
+        end,
+      },
+      targets = { 'OPEN', 'CLOSED' },
+    },
     SWITCHING_CWD = {
       hooks = {
         on_enter = function(self)
@@ -328,6 +388,22 @@ module.machine = {
         end,
       },
       targets = { 'OPEN' },
+    },
+    APPLYING_CWD = {
+      hooks = {
+        on_enter = function(self)
+          local cwd = self.ctx.cwd
+
+          if not cwd or not cwd.active then
+            notify('No cwd selected', vim.log.levels.INFO)
+            return self:transition('OPEN')
+          end
+
+          buffer_util.change_cwd(cwd.active, self.ctx.options.cwd.scope)
+          self:transition('CLOSED')
+        end,
+      },
+      targets = { 'OPEN', 'CLOSED' },
     },
     DELETING = {
       hooks = {

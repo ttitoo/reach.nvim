@@ -7,8 +7,8 @@ local module = {}
 local function default_cwd_fast()
   local keys = {}
 
-  for i = 1, 12 do
-    keys[i] = string.format('<F%s>', i)
+  for i = 1, 9 do
+    keys[i] = tostring(i)
   end
 
   return keys
@@ -45,9 +45,11 @@ local default = {
     vertsplit = '|',
     tabsplit = ']',
     delete = '<Space>',
+    previous = "`",
     priority = '=',
     cwd_next = '<Tab>',
     cwd_prev = '<S-Tab>',
+    cwd_apply = '<CR>',
     cwd = '<Tab>',
     cwd_fast = default_cwd_fast(),
   },
@@ -143,9 +145,11 @@ local function validate(options)
         vertsplit = { actions.vertsplit, 'string', true },
         tabsplit = { actions.tabsplit, 'string', true },
         delete = { actions.delete, 'string', true },
+        previous = { actions.previous, 'string', true },
         priority = { actions.priority, 'string', true },
         cwd_next = { actions.cwd_next, 'string', true },
         cwd_prev = { actions.cwd_prev, 'string', true },
+        cwd_apply = { actions.cwd_apply, 'string', true },
         cwd = { actions.cwd, 'string', true },
         cwd_fast = {
           actions.cwd_fast,
